@@ -1,0 +1,83 @@
+# Copy this file to:  <your-template-or-canvas-repo>/.github/workflows/flutter-canvas.yml
+#
+# Repo layout (same tree MYTH uses, but at repo root — not under frontend/):
+#   flutter-canvas/          ← copy of MYTH frontend/flutter-canvas (Dart sources)
+#   .github/workflows/      ← this workflow
+#
+# Do NOT add flutter-canvas/ to the same GitHub template repo that generates myth-app-*
+# (see githubUtils TEMPLATE_REPO) unless you want every user app repo to include the canvas.
+# Prefer a dedicated repo (e.g. Myth-Flutter-Canvas) or a branch used only for CI, not as generate template.
+#
+# Settings → Actions → Workflow permissions: Read and write (if you add a commit step below).
+
+name: Flutter design canvas (build web)
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "flutter-canvas/**"
+      - ".github/workflows/flutter-canvas.yml"
+  pull_request:
+    paths:
+      - "flutter-canvas/**"
+      - ".github/workflows/flutter-canvas.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: flutter-canvas-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.24.0"
+          channel: stable
+          cache: true
+
+      - name: Flutter pub get & build web
+        working-directory: flutter-canvas
+        run: |
+          flutter pub get
+          flutter build web --release --base-href /flutter-canvas/
+
+      - name: Upload build artifact
+        if: |
+          github.event_name == 'pull_request' ||
+          (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master')
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-canvas-web
+          path: flutter-canvas/build/web
+          retention-days: 14
+
+      # Optional: publish a branch or release consumable by MYTH; adjust to your deploy flow.
+      - name: Sync build to public/flutter-canvas (default branch only)
+        if: |
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+          (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        run: |
+          rm -rf public/flutter-canvas
+          mkdir -p public
+          cp -r flutter-canvas/build/web public/flutter-canvas
+
+      - name: Commit updated static bundle
+        if: |
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+          (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: rebuild flutter-canvas web bundle"
+          file_pattern: public/flutter-canvas/**
+          commit_user_name: github-actions[bot]
+          commit_user_email: github-actions[bot]@users.noreply.github.com
